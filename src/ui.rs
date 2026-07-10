@@ -373,7 +373,11 @@ mod tests {
 
     fn fake_chain_info() -> ChainInfo {
         let hops = vec![
-            ChainHop { kind: NodeKind::Leaf, node: fake_node("leaf.example"), status: HopStatus::Valid },
+            ChainHop {
+                kind: NodeKind::Leaf,
+                node: fake_node("leaf.example"),
+                status: HopStatus::Valid,
+            },
             ChainHop {
                 kind: NodeKind::Intermediate,
                 node: fake_node("Intermediate CA"),

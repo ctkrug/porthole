@@ -151,8 +151,7 @@ pub fn analyze(der_chain: &[Vec<u8>], now: OffsetDateTime) -> Result<ChainAnalys
         // A synthetic Root hop is appended right after this one, so `last`
         // itself is never the root here — unlike `last_kind`, which assumes
         // the last presented cert always occupies the root position.
-        let presented_kind =
-            if certs.len() == 1 { NodeKind::Leaf } else { NodeKind::Intermediate };
+        let presented_kind = if certs.len() == 1 { NodeKind::Leaf } else { NodeKind::Intermediate };
         hops.push(ChainHop { kind: presented_kind, node: to_cert_node(last), status });
         hops.push(ChainHop {
             kind: NodeKind::Root,

@@ -47,7 +47,11 @@ fn chain_with_omitted_root_labels_only_one_hop_as_root() {
         tls::fetch_chain("wrong.host.badssl.com").expect("live TLS fetch to wrong.host.badssl.com");
 
     let root_hops = info.analysis.hops.iter().filter(|hop| hop.kind == NodeKind::Root).count();
-    assert_eq!(root_hops, 1, "exactly one hop should be labeled as the root: {:#?}", info.analysis.hops);
+    assert_eq!(
+        root_hops, 1,
+        "exactly one hop should be labeled as the root: {:#?}",
+        info.analysis.hops
+    );
 
     let last = info.analysis.hops.last().expect("at least one hop");
     assert_eq!(last.kind, NodeKind::Root);
