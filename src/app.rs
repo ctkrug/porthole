@@ -206,6 +206,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -407,5 +408,45 @@ mod tests {
         let mut app = App::new(None);
         app.tick();
         assert_eq!(app.revealed, 0);
+    }
+
+    #[derive(Debug, Clone)]
+    enum InputAction {
+        Insert(char),
+        Backspace,
+        Left,
+        Right,
+    }
+
+    fn input_action() -> impl proptest::strategy::Strategy<Value = InputAction> {
+        prop_oneof![
+            any::<char>().prop_map(InputAction::Insert),
+            Just(InputAction::Backspace),
+            Just(InputAction::Left),
+            Just(InputAction::Right),
+        ]
+    }
+
+    proptest! {
+        /// Regression coverage for a real panic this project hit: indexing
+        /// `domain_input` by char count instead of byte offset broke on
+        /// multi-byte input. Any sequence of inserts/backspace/cursor moves
+        /// over arbitrary Unicode — not just the specific chars the example
+        /// tests use — must never panic, and the cursor must always stay
+        /// within the current input's char count.
+        #[test]
+        fn any_input_action_sequence_never_panics(actions in prop::collection::vec(input_action(), 0..100)) {
+            let mut app = App::new(None);
+            for action in actions {
+                let code = match action {
+                    InputAction::Insert(c) => KeyCode::Char(c),
+                    InputAction::Backspace => KeyCode::Backspace,
+                    InputAction::Left => KeyCode::Left,
+                    InputAction::Right => KeyCode::Right,
+                };
+                app.handle_key(key(code));
+                prop_assert!(app.input_cursor <= app.domain_input.chars().count());
+            }
+        }
     }
 }
