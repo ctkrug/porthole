@@ -1,18 +1,13 @@
-mod app;
-mod cert;
-mod chain;
-mod tls;
-mod ui;
-
 use std::io;
 
-use app::App;
 use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
+use porthole::app::App;
+use porthole::ui;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 

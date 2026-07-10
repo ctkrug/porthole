@@ -1,14 +1,8 @@
 // A real network integration test: connects to a well-known, stable domain
 // and exercises the full fetch -> parse -> validate pipeline end to end.
 // Requires outbound TLS to the public internet on port 443.
-#[path = "../src/cert.rs"]
-mod cert;
-#[path = "../src/chain.rs"]
-mod chain;
-#[path = "../src/tls.rs"]
-mod tls;
-
-use chain::NodeKind;
+use porthole::chain::NodeKind;
+use porthole::tls;
 
 #[test]
 fn google_com_chain_resolves_to_a_trusted_root() {
