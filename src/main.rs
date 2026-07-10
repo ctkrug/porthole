@@ -1,8 +1,9 @@
 mod app;
+mod ui;
 
 use std::io;
 
-use app::{App, Screen};
+use app::App;
 use clap::Parser;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
@@ -10,9 +11,7 @@ use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use ratatui::backend::CrosstermBackend;
-use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::{Frame, Terminal};
+use ratatui::Terminal;
 
 /// An animated, color-coded certificate-chain tree for your terminal.
 #[derive(Parser)]
@@ -50,22 +49,8 @@ fn run(
     app: &mut App,
 ) -> anyhow::Result<()> {
     while !app.should_quit {
-        terminal.draw(|frame| draw(frame, app))?;
+        terminal.draw(|frame| ui::draw(frame, app))?;
         app.handle_event()?;
     }
     Ok(())
-}
-
-fn draw(frame: &mut Frame, app: &App) {
-    let text = match app.screen {
-        Screen::Input => format!("Porthole\n\nDomain: {}_", app.domain_input),
-        Screen::Chain => format!(
-            "Porthole\n\n{}\n\n(chain fetch not yet implemented — 'n' for a new domain, 'q' to quit)",
-            app.domain.as_deref().unwrap_or("")
-        ),
-    };
-    let block = Paragraph::new(text)
-        .style(Style::default().fg(Color::Cyan))
-        .block(Block::default().borders(Borders::ALL).title("Porthole"));
-    frame.render_widget(block, frame.area());
 }
