@@ -504,6 +504,30 @@ mod tests {
         }
     }
 
+    /// Unlike certificate fields, `App::new`'s domain comes from a CLI
+    /// positional argument — `argv` can carry arbitrary bytes (e.g. from a
+    /// script or wrapper passing through an untrusted value), and nothing
+    /// validates it before it's used as this pane's title, both on a
+    /// successful lookup and on the error screen.
+    #[test]
+    fn malicious_cli_domain_argument_cannot_inject_terminal_escapes_in_title() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend should construct");
+
+        let mut app = App::new(None);
+        app.screen = Screen::Chain;
+        app.domain = Some("\u{1b}]0;pwned\u{7}evil.example".to_string());
+        app.fetch_result = Some(Err("connection refused".to_string()));
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        for cell in buffer.content() {
+            for ch in cell.symbol().chars() {
+                assert!(!ch.is_control(), "a raw control character reached the rendered buffer");
+            }
+        }
+    }
+
     /// Every screen/overlay combination, rendered at a spread of terminal
     /// sizes from absurdly tiny up to the documented 80x24 minimum and
     /// beyond, must not panic. This is the layout-math equivalent of a
