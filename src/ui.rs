@@ -348,3 +348,51 @@ fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
         ])
         .split(vertical[1])[1]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tls_1_0_and_1_1_are_weak() {
+        assert!(is_weak_protocol("TLS 1.0"));
+        assert!(is_weak_protocol("TLS 1.1"));
+    }
+
+    #[test]
+    fn tls_1_2_and_1_3_are_not_weak() {
+        assert!(!is_weak_protocol("TLS 1.2"));
+        assert!(!is_weak_protocol("TLS 1.3"));
+    }
+
+    #[test]
+    fn unknown_protocol_string_is_not_flagged_weak() {
+        assert!(!is_weak_protocol("unknown"));
+    }
+
+    #[test]
+    fn legacy_cbc_sha1_cipher_is_weak() {
+        assert!(is_weak_cipher("TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA"));
+    }
+
+    #[test]
+    fn rc4_3des_null_export_ciphers_are_weak() {
+        assert!(is_weak_cipher("TLS_RSA_WITH_RC4_128_SHA"));
+        assert!(is_weak_cipher("TLS_RSA_WITH_3DES_EDE_CBC_SHA"));
+        assert!(is_weak_cipher("TLS_RSA_WITH_NULL_SHA"));
+        assert!(is_weak_cipher("TLS_RSA_EXPORT_WITH_RC4_40_MD5"));
+    }
+
+    #[test]
+    fn modern_cbc_sha256_cipher_is_not_weak() {
+        // Contains "CBC_SHA" as a substring of "CBC_SHA256" but uses a
+        // strong hash, so it must not be flagged.
+        assert!(!is_weak_cipher("TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256"));
+    }
+
+    #[test]
+    fn aead_tls13_cipher_is_not_weak() {
+        assert!(!is_weak_cipher("TLS13_AES_256_GCM_SHA384"));
+        assert!(!is_weak_cipher("TLS13_CHACHA20_POLY1305_SHA256"));
+    }
+}
