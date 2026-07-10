@@ -351,6 +351,25 @@ mod tests {
     }
 
     #[test]
+    fn typing_a_multibyte_char_then_another_does_not_panic() {
+        let mut app = App::new(None);
+        app.handle_key(key(KeyCode::Char('é')));
+        app.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(app.domain_input, "éx");
+        assert_eq!(app.input_cursor, 2);
+    }
+
+    #[test]
+    fn backspace_after_a_multibyte_char_does_not_panic() {
+        let mut app = App::new(None);
+        app.handle_key(key(KeyCode::Char('日')));
+        app.handle_key(key(KeyCode::Char('本')));
+        app.handle_key(key(KeyCode::Backspace));
+        assert_eq!(app.domain_input, "日");
+        assert_eq!(app.input_cursor, 1);
+    }
+
+    #[test]
     fn tick_reveals_nothing_without_a_fetch_result() {
         let mut app = App::new(None);
         app.tick();
