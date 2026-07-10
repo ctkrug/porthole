@@ -27,6 +27,19 @@ fn unknown_flag_is_a_clean_usage_error_not_a_panic() {
 }
 
 #[test]
+fn extra_positional_argument_is_a_clean_usage_error_not_a_panic() {
+    let output = Command::new(env!("CARGO_BIN_EXE_porthole"))
+        .args(["example.com", "unexpected-second-arg"])
+        .output()
+        .expect("failed to run porthole with two positional args");
+
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("Usage"));
+    assert!(!stderr.contains("panicked"));
+}
+
+#[test]
 fn version_flag_prints_a_version_and_exits_success() {
     let output = Command::new(env!("CARGO_BIN_EXE_porthole"))
         .arg("--version")
