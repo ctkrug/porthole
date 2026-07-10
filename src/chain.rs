@@ -302,6 +302,7 @@ fn wrap_der_sequence(value: &[u8]) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use rcgen::{
         Certificate as RcgenCertificate, CertificateParams, DistinguishedName, DnType, KeyPair,
     };
@@ -605,5 +606,24 @@ mod tests {
         let der = cert.der().to_vec();
         let (_, x509) = X509Certificate::from_der(&der).expect("parse");
         assert!(!is_known_anchor_spki(x509.public_key().raw));
+    }
+
+    proptest! {
+        /// `wrap_der_sequence` and `der_value` are exact inverses for any
+        /// value byte string, short-form or long-form length encoding
+        /// alike — this is the property the two hand-written round-trip
+        /// tests above each check for one fixed size.
+        #[test]
+        fn wrap_then_strip_round_trips_for_any_value(value in prop::collection::vec(any::<u8>(), 0..600)) {
+            let wrapped = wrap_der_sequence(&value);
+            prop_assert_eq!(der_value(&wrapped), value.as_slice());
+        }
+
+        /// `der_value` must never panic, even on truncated or malformed
+        /// TLV bytes that don't correspond to any real DER encoding.
+        #[test]
+        fn der_value_never_panics_on_arbitrary_bytes(bytes in prop::collection::vec(any::<u8>(), 0..16)) {
+            let _ = der_value(&bytes);
+        }
     }
 }
