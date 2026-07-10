@@ -144,9 +144,11 @@ impl App {
                 self.start_lookup(domain);
             }
             KeyCode::Char(c) => {
-                let byte_idx = self.cursor_byte_offset(self.input_cursor);
-                self.domain_input.insert(byte_idx, c);
-                self.input_cursor += 1;
+                if self.domain_input.chars().count() < MAX_DOMAIN_INPUT_LEN {
+                    let byte_idx = self.cursor_byte_offset(self.input_cursor);
+                    self.domain_input.insert(byte_idx, c);
+                    self.input_cursor += 1;
+                }
             }
             KeyCode::Backspace => {
                 if self.input_cursor > 0 {
