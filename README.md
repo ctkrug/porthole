@@ -1,5 +1,7 @@
 # Porthole
 
+[![CI](https://github.com/ctkrug/porthole/actions/workflows/ci.yml/badge.svg)](https://github.com/ctkrug/porthole/actions/workflows/ci.yml)
+
 A terminal TUI that builds an animated, color-coded certificate-chain tree for
 any domain — chain validity, cipher suite, HSTS, and expiry, all at a glance.
 
