@@ -109,7 +109,8 @@ fn fetch_response_headers(
     domain: &str,
 ) -> Option<String> {
     let request = format!(
-        "GET / HTTP/1.1\r\nHost: {domain}\r\nConnection: close\r\nUser-Agent: porthole/0.1\r\n\r\n"
+        "GET / HTTP/1.1\r\nHost: {domain}\r\nConnection: close\r\nUser-Agent: porthole/{}\r\n\r\n",
+        env!("CARGO_PKG_VERSION")
     );
     tls.write_all(request.as_bytes()).ok()?;
 
