@@ -52,9 +52,14 @@ files, causing `cargo build`/`clippy` to compile them twice.
    next certificate's public key and checks its validity window. The
    terminal hop is resolved against the compiled-in `webpki-roots` trust
    store by public key (not by name, and not by assuming self-signed
-   means trusted — see the doc comments in `chain.rs` for the two bugs
-   that taught that the hard way) so the tree always shows leaf through
-   root, whether or not the server bothered to send the root itself.
+   means trusted — see the doc comments in `chain.rs` for the bugs that
+   taught that the hard way) so the tree always shows leaf through root,
+   whether or not the server bothered to send the root itself. When a
+   server omits its root (the common, best-practice case), the presented
+   chain's last cert must be labeled by what it actually is (leaf or
+   intermediate), never by chain-position alone — that heuristic
+   mislabeled it `Root` alongside the real, synthesized root hop until a
+   QA pass caught it live against `wrong.host.badssl.com`.
 6. `ui::draw` renders the two-pane chain-tree/connection-panel layout,
    plus the help and node-detail overlays, per `docs/DESIGN.md`.
 
@@ -71,6 +76,22 @@ files, causing `cargo build`/`clippy` to compile them twice.
   domains.
 - `hsts.rs` is a pure string parser, independent of how the header text
   was obtained, so it's fully unit-tested without any I/O.
+
+## Testing strategy
+
+- Pure-logic modules (`cert.rs`, `chain.rs`'s DER helpers, `hsts.rs`)
+  pair hand-written example tests with `proptest` property tests, since
+  they're exactly the parser/pure-logic shape where property testing
+  finds what hand-picked examples miss (e.g. any DER value round-tripping
+  through `wrap_der_sequence`/`der_value`, not just two fixed sizes).
+- `ui.rs` renders through a `ratatui::backend::TestBackend` in-process —
+  no real terminal needed — driving every screen/overlay combination
+  across terminal sizes from 0x0 up past the documented 80x24 minimum,
+  and asserting on actual buffer cell styles (e.g. a pane's border color
+  while an overlay dims it) rather than just "did it not panic."
+- `app.rs`'s domain-input editor is fuzzed with a property test over
+  arbitrary Unicode insert/backspace/cursor sequences — this project has
+  already shipped one real panic from char-vs-byte-offset indexing here.
 
 ## Running it
 
