@@ -528,6 +528,27 @@ mod tests {
         }
     }
 
+    /// A terminal can forward a pasted control byte (BEL, for instance)
+    /// as an ordinary `KeyCode::Char` — there's no special "paste" event
+    /// without bracketed-paste handling this app doesn't implement — so
+    /// `domain_input` can carry one before a lookup is ever submitted.
+    #[test]
+    fn malicious_pasted_domain_input_cannot_inject_terminal_escapes() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend should construct");
+
+        let mut app = App::new(None);
+        app.domain_input = "\u{1b}]0;pwned\u{7}evil.example".to_string();
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        for cell in buffer.content() {
+            for ch in cell.symbol().chars() {
+                assert!(!ch.is_control(), "a raw control character reached the rendered buffer");
+            }
+        }
+    }
+
     /// Every screen/overlay combination, rendered at a spread of terminal
     /// sizes from absurdly tiny up to the documented 80x24 minimum and
     /// beyond, must not panic. This is the layout-math equivalent of a
