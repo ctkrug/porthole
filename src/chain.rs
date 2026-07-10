@@ -122,13 +122,31 @@ pub fn analyze(der_chain: &[Vec<u8>], now: OffsetDateTime) -> Result<ChainAnalys
     let last_kind = hop_kind(certs.len() - 1, certs.len());
     let is_self_signed = last.subject().as_raw() == last.issuer().as_raw();
 
-    let reaches_trusted_root = if is_self_signed {
-        let status = hop_status(last, None, now);
+    let reaches_trusted_root = if is_known_anchor_spki(last.public_key().raw) {
+        // Its public key is a recognized trust anchor. It doesn't matter
+        // whether this particular certificate object is self-signed or
+        // cross-signed by yet another CA for legacy compatibility — any
+        // hop above it in the chain was already verified (in the loop
+        // above) against this exact embedded key, which is the only
+        // cryptographic link that matters here.
+        let status = date_status(last, now).unwrap_or(HopStatus::Valid);
         let reaches = status.is_valid();
         hops.push(ChainHop { kind: NodeKind::Root, node: to_cert_node(last), status });
         reaches
-    } else if let Some(anchor_spki) = find_trust_anchor(last.issuer().as_raw()) {
-        let status = hop_status(last, Some(&anchor_spki), now);
+    } else if is_self_signed {
+        // Self-signed only means the chain is cryptographically complete,
+        // not that anyone should trust it — a certificate signed by its
+        // own key is exactly what an attacker would also generate.
+        let status = hop_status(last, None, now);
+        hops.push(ChainHop { kind: NodeKind::Root, node: to_cert_node(last), status });
+        false
+    } else if let Some(anchor_spki_der) = find_trust_anchor_spki(last.issuer().as_raw()) {
+        let status = match SubjectPublicKeyInfo::from_der(&anchor_spki_der) {
+            Ok((_, anchor_spki)) => hop_status(last, Some(&anchor_spki), now),
+            Err(_) => {
+                HopStatus::UnverifiedIssuer("trust anchor key could not be parsed".to_string())
+            }
+        };
         let reaches = status.is_valid();
         hops.push(ChainHop { kind: last_kind, node: to_cert_node(last), status });
         hops.push(ChainHop {
@@ -225,17 +243,56 @@ fn pubkey_algorithm_name(spki: &SubjectPublicKeyInfo) -> String {
     }
 }
 
-/// Look up a Mozilla-trusted root by raw DER subject name, returning its
-/// public key info if found.
-fn find_trust_anchor(issuer_raw: &[u8]) -> Option<SubjectPublicKeyInfo<'static>> {
+/// Look up a Mozilla-trusted root by raw DER subject name, returning the
+/// full DER `SubjectPublicKeyInfo` TLV for its public key if found.
+fn find_trust_anchor_spki(issuer_raw: &[u8]) -> Option<Vec<u8>> {
+    let issuer_value = der_value(issuer_raw);
     webpki_roots::TLS_SERVER_ROOTS
         .iter()
-        .find(|anchor| anchor.subject.as_ref() == issuer_raw)
-        .and_then(|anchor| {
-            SubjectPublicKeyInfo::from_der(anchor.subject_public_key_info.as_ref())
-                .ok()
-                .map(|(_, spki)| spki)
-        })
+        .find(|anchor| anchor.subject.as_ref() == issuer_value)
+        .map(|anchor| wrap_der_sequence(anchor.subject_public_key_info.as_ref()))
+}
+
+/// True if `spki_raw` is the exact public key of a Mozilla-trusted root,
+/// independent of how any particular certificate carrying that key
+/// happens to be signed (self-signed, or cross-signed for legacy clients).
+fn is_known_anchor_spki(spki_raw: &[u8]) -> bool {
+    let spki_value = der_value(spki_raw);
+    webpki_roots::TLS_SERVER_ROOTS
+        .iter()
+        .any(|anchor| anchor.subject_public_key_info.as_ref() == spki_value)
+}
+
+/// Strip a DER TLV's tag+length header, returning just the value bytes.
+/// `x509-parser`'s `.as_raw()`/`SubjectPublicKeyInfo.raw` return the full
+/// TLV, while `webpki-roots`' `TrustAnchor` fields store only the value —
+/// this puts both sides on the same footing for byte comparison.
+fn der_value(tlv: &[u8]) -> &[u8] {
+    let Some(&len_byte) = tlv.get(1) else {
+        return &[];
+    };
+    let header_len = if len_byte & 0x80 == 0 { 2 } else { 2 + (len_byte & 0x7f) as usize };
+    tlv.get(header_len..).unwrap_or(&[])
+}
+
+/// The inverse of `der_value` for a SEQUENCE: re-wrap value bytes with a
+/// proper tag+length header so they can be parsed as a standalone DER TLV
+/// again (needed to turn a `webpki-roots` SPKI value back into something
+/// `SubjectPublicKeyInfo::from_der` can parse).
+fn wrap_der_sequence(value: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x30u8];
+    let len = value.len();
+    if len < 0x80 {
+        out.push(len as u8);
+    } else {
+        let len_bytes = len.to_be_bytes();
+        let first_nonzero = len_bytes.iter().position(|&b| b != 0).unwrap_or(len_bytes.len() - 1);
+        let significant = &len_bytes[first_nonzero..];
+        out.push(0x80 | significant.len() as u8);
+        out.extend_from_slice(significant);
+    }
+    out.extend_from_slice(value);
+    out
 }
 
 #[cfg(test)]
@@ -322,23 +379,26 @@ mod tests {
     }
 
     #[test]
-    fn fully_valid_chain_with_presented_root_is_valid() {
+    fn presented_chain_signs_and_dates_all_check_out() {
         let now = OffsetDateTime::now_utc();
         let chain = valid_test_chain(now);
         let analysis =
             analyze(&[chain.leaf_der, chain.intermediate_der, chain.root_der], now).unwrap();
 
-        assert!(analysis.is_fully_valid());
-        assert!(analysis.reaches_trusted_root);
         assert_eq!(analysis.hops.len(), 3);
         assert_eq!(analysis.hops[0].kind, NodeKind::Leaf);
         assert_eq!(analysis.hops[0].node.subject, "leaf.example.test");
         assert_eq!(analysis.hops[1].kind, NodeKind::Intermediate);
         assert_eq!(analysis.hops[2].kind, NodeKind::Root);
-        assert_eq!(analysis.verdict(), "Chain: VALID");
         for hop in &analysis.hops {
             assert_eq!(hop.status, HopStatus::Valid);
         }
+
+        // A self-signed root is only cryptographically complete, not
+        // trusted — our fabricated test CA is never in the real store.
+        assert!(!analysis.reaches_trusted_root);
+        assert!(!analysis.is_fully_valid());
+        assert_eq!(analysis.verdict(), "Chain: UNTRUSTED — no trusted root found");
     }
 
     #[test]
@@ -425,7 +485,7 @@ mod tests {
     }
 
     #[test]
-    fn single_self_signed_cert_is_its_own_root() {
+    fn single_self_signed_cert_is_its_own_root_but_untrusted() {
         let now = OffsetDateTime::now_utc();
         let (cert, _key) = make_cert(
             "standalone.example.test",
@@ -438,6 +498,83 @@ mod tests {
 
         assert_eq!(analysis.hops.len(), 1);
         assert_eq!(analysis.hops[0].kind, NodeKind::Root);
-        assert!(analysis.is_fully_valid());
+        // The signature is self-consistent...
+        assert_eq!(analysis.hops[0].status, HopStatus::Valid);
+        // ...but an unrecognized self-signed cert must never be reported
+        // as reaching a trusted root — that's exactly what a spoofed or
+        // attacker-generated certificate would also look like.
+        assert!(!analysis.reaches_trusted_root);
+        assert!(!analysis.is_fully_valid());
+    }
+
+    #[test]
+    fn der_value_strips_short_form_length_header() {
+        // SEQUENCE, length 2, value [0xAA, 0xBB]
+        let tlv = [0x30, 0x02, 0xAA, 0xBB];
+        assert_eq!(der_value(&tlv), &[0xAA, 0xBB]);
+    }
+
+    #[test]
+    fn der_value_strips_long_form_length_header() {
+        let value = vec![0x42; 200];
+        let mut tlv = vec![0x30, 0x81, 200u8];
+        tlv.extend_from_slice(&value);
+        assert_eq!(der_value(&tlv), value.as_slice());
+    }
+
+    #[test]
+    fn der_value_on_truncated_input_is_empty() {
+        assert_eq!(der_value(&[0x30]), &[] as &[u8]);
+        assert_eq!(der_value(&[]), &[] as &[u8]);
+    }
+
+    #[test]
+    fn wrap_der_sequence_round_trips_through_der_value() {
+        let value = vec![1, 2, 3, 4, 5];
+        let wrapped = wrap_der_sequence(&value);
+        assert_eq!(der_value(&wrapped), value.as_slice());
+    }
+
+    #[test]
+    fn wrap_der_sequence_round_trips_long_form_length() {
+        let value = vec![0x07; 300];
+        let wrapped = wrap_der_sequence(&value);
+        assert_eq!(der_value(&wrapped), value.as_slice());
+    }
+
+    #[test]
+    fn find_trust_anchor_spki_matches_a_real_compiled_in_root() {
+        // Regression test for a real bug: `webpki-roots` stores DER
+        // *value* bytes for `TrustAnchor` fields, while x509-parser's
+        // `.as_raw()` returns the full tag+length+value TLV. Comparing
+        // them directly (without stripping/re-wrapping headers) silently
+        // never matched anything.
+        let anchor = webpki_roots::TLS_SERVER_ROOTS.first().expect("at least one root");
+        let issuer_tlv = wrap_der_sequence(anchor.subject.as_ref());
+
+        let found =
+            find_trust_anchor_spki(&issuer_tlv).expect("anchor should be found by its own subject");
+        let (_, spki) = SubjectPublicKeyInfo::from_der(&found).expect("anchor SPKI must parse");
+        assert_eq!(spki.raw, wrap_der_sequence(anchor.subject_public_key_info.as_ref()));
+    }
+
+    #[test]
+    fn is_known_anchor_spki_matches_a_real_compiled_in_root() {
+        let anchor = webpki_roots::TLS_SERVER_ROOTS.first().expect("at least one root");
+        let spki_tlv = wrap_der_sequence(anchor.subject_public_key_info.as_ref());
+        assert!(is_known_anchor_spki(&spki_tlv));
+    }
+
+    #[test]
+    fn is_known_anchor_spki_rejects_unrelated_key() {
+        let (cert, _key) = make_cert(
+            "not-a-real-root.example.test",
+            OffsetDateTime::now_utc() - Duration::days(1),
+            OffsetDateTime::now_utc() + Duration::days(1),
+            None,
+        );
+        let der = cert.der().to_vec();
+        let (_, x509) = X509Certificate::from_der(&der).expect("parse");
+        assert!(!is_known_anchor_spki(x509.public_key().raw));
     }
 }
