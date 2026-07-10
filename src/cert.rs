@@ -49,6 +49,7 @@ impl CertNode {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use time::macros::datetime;
 
     fn sample_node() -> CertNode {
@@ -128,5 +129,39 @@ mod tests {
         assert!(!node.is_expired(now));
         assert!(!node.is_not_yet_valid(now));
         assert!(!node.expires_within(now, 14));
+    }
+
+    proptest! {
+        /// However `not_before`/`not_after`/`now` relate, a handful of
+        /// invariants must hold for *any* combination — not just the
+        /// specific dates the example tests above happen to pick.
+        #[test]
+        fn validity_predicates_are_internally_consistent(
+            not_before_offset in -10_000i64..10_000,
+            window_days in 0i64..10_000,
+            now_offset in -10_000i64..10_000,
+            urgent_days in 0i64..365,
+        ) {
+            let epoch = datetime!(2026-01-01 0:00 UTC);
+            let not_before = epoch + Duration::days(not_before_offset);
+            let not_after = not_before + Duration::days(window_days);
+            let now = epoch + Duration::days(now_offset);
+            let node = CertNode { not_before: Some(not_before), not_after: Some(not_after), ..sample_node() };
+
+            // Exactly one of expired/not-yet-valid/currently-valid holds,
+            // since not_before <= not_after by construction.
+            prop_assert_eq!(
+                node.is_currently_valid(now),
+                !node.is_expired(now) && !node.is_not_yet_valid(now)
+            );
+            prop_assert!(!(node.is_expired(now) && node.is_not_yet_valid(now)));
+
+            // A cert flagged as expiring soon must actually be valid right
+            // now and actually expire within the claimed window.
+            if node.expires_within(now, urgent_days) {
+                prop_assert!(node.is_currently_valid(now));
+                prop_assert!(not_after - now <= Duration::days(urgent_days));
+            }
+        }
     }
 }
