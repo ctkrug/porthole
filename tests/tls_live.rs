@@ -74,6 +74,21 @@ fn expired_leaf_is_flagged_and_chain_verdict_is_invalid() {
 }
 
 #[test]
+fn self_signed_chain_is_cryptographically_valid_but_untrusted() {
+    let info = tls::fetch_chain("self-signed.badssl.com")
+        .expect("live TLS fetch to self-signed.badssl.com");
+
+    assert_eq!(info.analysis.hops.len(), 1);
+    assert_eq!(info.analysis.hops[0].kind, NodeKind::Root);
+    // The self-signature is internally consistent...
+    assert_eq!(info.analysis.hops[0].status, HopStatus::Valid);
+    // ...but a self-signed cert is exactly what a spoofed chain also looks
+    // like, so it must never be reported as reaching a trusted root.
+    assert!(!info.analysis.reaches_trusted_root);
+    assert_eq!(info.analysis.verdict(), "Chain: UNTRUSTED — no trusted root found");
+}
+
+#[test]
 fn unresolvable_domain_fails_gracefully() {
     let err = tls::fetch_chain("this-domain-does-not-exist-porthole-test.invalid")
         .expect_err("nonexistent domain must not succeed");
