@@ -89,6 +89,18 @@ fn self_signed_chain_is_cryptographically_valid_but_untrusted() {
 }
 
 #[test]
+fn untrusted_root_chain_is_flagged_untrusted_not_valid() {
+    // untrusted-root.badssl.com presents a full leaf -> root chain, but the
+    // root is a CA no real trust store (including webpki-roots) recognizes.
+    let info = tls::fetch_chain("untrusted-root.badssl.com")
+        .expect("live TLS fetch to untrusted-root.badssl.com");
+
+    assert!(!info.analysis.reaches_trusted_root);
+    assert!(!info.analysis.is_fully_valid());
+    assert_eq!(info.analysis.verdict(), "Chain: UNTRUSTED — no trusted root found");
+}
+
+#[test]
 fn unresolvable_domain_fails_gracefully() {
     let err = tls::fetch_chain("this-domain-does-not-exist-porthole-test.invalid")
         .expect_err("nonexistent domain must not succeed");
