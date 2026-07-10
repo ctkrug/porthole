@@ -1,7 +1,10 @@
+mod app;
+
 use std::io;
 
+use app::{App, Screen};
 use clap::Parser;
-use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -9,7 +12,7 @@ use crossterm::terminal::{
 use ratatui::backend::CrosstermBackend;
 use ratatui::style::{Color, Style};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Terminal;
+use ratatui::{Frame, Terminal};
 
 /// An animated, color-coded certificate-chain tree for your terminal.
 #[derive(Parser)]
@@ -21,7 +24,6 @@ struct Cli {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let domain = cli.domain.unwrap_or_default();
 
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -29,7 +31,8 @@ fn main() -> anyhow::Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let result = run(&mut terminal, &domain);
+    let mut app = App::new(cli.domain);
+    let result = run(&mut terminal, &mut app);
 
     disable_raw_mode()?;
     execute!(
@@ -44,25 +47,25 @@ fn main() -> anyhow::Result<()> {
 
 fn run(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    domain: &str,
+    app: &mut App,
 ) -> anyhow::Result<()> {
-    loop {
-        terminal.draw(|frame| {
-            let text = if domain.is_empty() {
-                "Porthole\n\npress 'q' to quit".to_string()
-            } else {
-                format!("Porthole\n\n{domain}\n\npress 'q' to quit")
-            };
-            let block = Paragraph::new(text)
-                .style(Style::default().fg(Color::Cyan))
-                .block(Block::default().borders(Borders::ALL).title("Porthole"));
-            frame.render_widget(block, frame.area());
-        })?;
-
-        if let Event::Key(key) = event::read()? {
-            if key.code == KeyCode::Char('q') {
-                return Ok(());
-            }
-        }
+    while !app.should_quit {
+        terminal.draw(|frame| draw(frame, app))?;
+        app.handle_event()?;
     }
+    Ok(())
+}
+
+fn draw(frame: &mut Frame, app: &App) {
+    let text = match app.screen {
+        Screen::Input => format!("Porthole\n\nDomain: {}_", app.domain_input),
+        Screen::Chain => format!(
+            "Porthole\n\n{}\n\n(chain fetch not yet implemented — 'n' for a new domain, 'q' to quit)",
+            app.domain.as_deref().unwrap_or("")
+        ),
+    };
+    let block = Paragraph::new(text)
+        .style(Style::default().fg(Color::Cyan))
+        .block(Block::default().borders(Borders::ALL).title("Porthole"));
+    frame.render_widget(block, frame.area());
 }
