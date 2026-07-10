@@ -18,7 +18,7 @@ a fast, pretty, interactive glance at a chain from a terminal you're already
 in. Porthole is built to be the tool you reach for when you just want to
 *look* at a cert chain, not parse a report.
 
-## Planned features
+## Features
 
 - **Animated chain tree** — leaf, intermediates, and root revealed link by
   link as each hop is validated, not dumped all at once.
@@ -26,12 +26,15 @@ in. Porthole is built to be the tool you reach for when you just want to
   expiry window, and trust anchor, plus an overall chain verdict.
 - **Cipher suite & protocol panel** — negotiated TLS version and cipher
   suite for the connection, flagged if weak or deprecated.
-- **Expiry-aware coloring** — certs colored by how close they are to
-  expiring (comfortable / soon / urgent / expired).
+- **Expiry-aware coloring** — leaf expiry flagged distinctly once it's
+  within 14 days.
 - **HSTS check** — whether the origin sends `Strict-Transport-Security`,
   and with what `max-age`.
-- **Keyboard-driven** — type a domain, hit enter, watch it build; no mouse
-  required.
+- **Node detail pane** — select any hop with the arrow keys and press
+  Enter for its full subject/issuer DN, serial, and public key algorithm.
+- **Keyboard-driven** — type a domain, hit enter, watch it build; `n` to
+  look up another domain without restarting, `?` for keybindings, no
+  mouse required.
 
 ## Stack
 
@@ -45,14 +48,21 @@ in. Porthole is built to be the tool you reach for when you just want to
 
 ## Status
 
-Early scaffold. See [`docs/VISION.md`](docs/VISION.md) for the design and
-[`docs/BACKLOG.md`](docs/BACKLOG.md) for the build plan.
+Core chain inspection is working end to end: connect, validate, and
+animate. See [`docs/VISION.md`](docs/VISION.md) for the design and
+[`docs/BACKLOG.md`](docs/BACKLOG.md) for what's built vs. remaining.
 
 ## Usage
 
 ```sh
 cargo run -- example.com
+# or, with no argument, Porthole prompts for a domain:
+cargo run
 ```
+
+Keybindings: `↑`/`↓` select a chain node, `Enter` shows its detail pane
+(`Esc` to close), `n` looks up a new domain, `?` shows all keybindings,
+`q` or `Ctrl+C` quits.
 
 ## License
 
