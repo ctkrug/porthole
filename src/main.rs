@@ -1,4 +1,5 @@
 mod app;
+mod cert;
 mod ui;
 
 use std::io;
