@@ -96,6 +96,10 @@ files, causing `cargo build`/`clippy` to compile them twice.
 ## Running it
 
 - `cargo run -- <domain>` or `cargo run` (prompts for a domain).
-- `cargo test` — unit tests (no network) plus `tests/tls_live.rs`, which
-  needs outbound TLS to the public internet.
-- `just check` runs the same fmt/clippy/test steps as CI.
+- `cargo test` runs the unit and CLI tests, which need no network and are
+  fully deterministic. The live tests in `tests/tls_live.rs` reach real
+  hosts on the internet, so they are `#[ignore]`d by default; run them with
+  `just test-live` (or `cargo test --test tls_live -- --ignored`).
+- `just check` runs the same fmt/clippy/test steps as the blocking CI job.
+  A separate, non-blocking CI job runs the live tests so a third-party
+  outage never reddens the badge.

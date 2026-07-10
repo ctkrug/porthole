@@ -33,3 +33,21 @@ jobs:
 
       - name: Test
         run: cargo test --verbose
+
+  live:
+    # Network-dependent integration tests against real hosts (badssl.com et al).
+    # Kept separate and non-blocking so a third-party outage never reddens the
+    # badge or blocks a merge; failures here point at the network, not the code.
+    name: live TLS tests (non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Live tests
+        run: cargo test --test tls_live -- --ignored
