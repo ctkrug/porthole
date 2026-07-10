@@ -237,3 +237,207 @@ fn find_trust_anchor(issuer_raw: &[u8]) -> Option<SubjectPublicKeyInfo<'static>>
                 .map(|(_, spki)| spki)
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rcgen::{
+        Certificate as RcgenCertificate, CertificateParams, DistinguishedName, DnType, KeyPair,
+    };
+    use time::Duration;
+
+    fn make_cert(
+        cn: &str,
+        not_before: OffsetDateTime,
+        not_after: OffsetDateTime,
+        issuer: Option<(&RcgenCertificate, &KeyPair)>,
+    ) -> (RcgenCertificate, KeyPair) {
+        let key_pair = KeyPair::generate().expect("keygen");
+        let mut params = CertificateParams::new(Vec::<String>::new()).expect("params");
+        params.not_before = not_before;
+        params.not_after = not_after;
+        let mut dn = DistinguishedName::new();
+        dn.push(DnType::CommonName, cn);
+        params.distinguished_name = dn;
+
+        let cert = match issuer {
+            Some((issuer_cert, issuer_key)) => {
+                params.signed_by(&key_pair, issuer_cert, issuer_key).expect("sign")
+            }
+            None => params.self_signed(&key_pair).expect("self sign"),
+        };
+        (cert, key_pair)
+    }
+
+    /// A three-tier chain (root -> intermediate -> leaf) all currently
+    /// valid, each signed by the level above.
+    struct TestChain {
+        leaf_der: Vec<u8>,
+        intermediate_der: Vec<u8>,
+        root_der: Vec<u8>,
+    }
+
+    /// A currently-valid root and intermediate pair, ready to sign a leaf.
+    fn valid_root_and_intermediate(
+        now: OffsetDateTime,
+    ) -> (RcgenCertificate, KeyPair, RcgenCertificate, KeyPair) {
+        let (root_cert, root_key) =
+            make_cert("Test Root CA", now - Duration::days(3650), now + Duration::days(3650), None);
+        let (intermediate_cert, intermediate_key) = make_cert(
+            "Test Intermediate CA",
+            now - Duration::days(365),
+            now + Duration::days(365),
+            Some((&root_cert, &root_key)),
+        );
+        (root_cert, root_key, intermediate_cert, intermediate_key)
+    }
+
+    fn valid_test_chain(now: OffsetDateTime) -> TestChain {
+        let (root_cert, _root_key, intermediate_cert, intermediate_key) =
+            valid_root_and_intermediate(now);
+        let (leaf_cert, _leaf_key) = make_cert(
+            "leaf.example.test",
+            now - Duration::days(30),
+            now + Duration::days(60),
+            Some((&intermediate_cert, &intermediate_key)),
+        );
+        TestChain {
+            leaf_der: leaf_cert.der().to_vec(),
+            intermediate_der: intermediate_cert.der().to_vec(),
+            root_der: root_cert.der().to_vec(),
+        }
+    }
+
+    #[test]
+    fn empty_chain_is_an_error() {
+        let now = OffsetDateTime::now_utc();
+        assert_eq!(analyze(&[], now).unwrap_err(), ChainError::Empty);
+    }
+
+    #[test]
+    fn malformed_der_is_a_parse_error() {
+        let now = OffsetDateTime::now_utc();
+        let err = analyze(&[vec![0, 1, 2, 3]], now).unwrap_err();
+        assert!(matches!(err, ChainError::Parse(_)));
+    }
+
+    #[test]
+    fn fully_valid_chain_with_presented_root_is_valid() {
+        let now = OffsetDateTime::now_utc();
+        let chain = valid_test_chain(now);
+        let analysis =
+            analyze(&[chain.leaf_der, chain.intermediate_der, chain.root_der], now).unwrap();
+
+        assert!(analysis.is_fully_valid());
+        assert!(analysis.reaches_trusted_root);
+        assert_eq!(analysis.hops.len(), 3);
+        assert_eq!(analysis.hops[0].kind, NodeKind::Leaf);
+        assert_eq!(analysis.hops[0].node.subject, "leaf.example.test");
+        assert_eq!(analysis.hops[1].kind, NodeKind::Intermediate);
+        assert_eq!(analysis.hops[2].kind, NodeKind::Root);
+        assert_eq!(analysis.verdict(), "Chain: VALID");
+        for hop in &analysis.hops {
+            assert_eq!(hop.status, HopStatus::Valid);
+        }
+    }
+
+    #[test]
+    fn expired_leaf_is_flagged_expired() {
+        let now = OffsetDateTime::now_utc();
+        let (root_cert, _root_key, intermediate_cert, intermediate_key) =
+            valid_root_and_intermediate(now);
+        let (expired_leaf, _leaf_key) = make_cert(
+            "expired.example.test",
+            now - Duration::days(60),
+            now - Duration::days(1),
+            Some((&intermediate_cert, &intermediate_key)),
+        );
+
+        let der_chain = vec![
+            expired_leaf.der().to_vec(),
+            intermediate_cert.der().to_vec(),
+            root_cert.der().to_vec(),
+        ];
+        let analysis = analyze(&der_chain, now).unwrap();
+
+        assert_eq!(analysis.hops[0].status, HopStatus::Expired);
+        assert!(!analysis.is_fully_valid());
+        assert!(analysis.verdict().contains("expired"));
+    }
+
+    #[test]
+    fn not_yet_valid_leaf_is_flagged() {
+        let now = OffsetDateTime::now_utc();
+        let (root_cert, _root_key, intermediate_cert, intermediate_key) =
+            valid_root_and_intermediate(now);
+        let (future_leaf, _leaf_key) = make_cert(
+            "future.example.test",
+            now + Duration::days(1),
+            now + Duration::days(60),
+            Some((&intermediate_cert, &intermediate_key)),
+        );
+
+        let der_chain = vec![
+            future_leaf.der().to_vec(),
+            intermediate_cert.der().to_vec(),
+            root_cert.der().to_vec(),
+        ];
+        let analysis = analyze(&der_chain, now).unwrap();
+
+        assert_eq!(analysis.hops[0].status, HopStatus::NotYetValid);
+        assert!(!analysis.is_fully_valid());
+    }
+
+    #[test]
+    fn tampered_intermediate_breaks_signature_chain() {
+        let now = OffsetDateTime::now_utc();
+        let chain = valid_test_chain(now);
+        // A different, unrelated CA with the same common name: the leaf's
+        // signature was made with the real intermediate's key, so it must
+        // not verify against this impostor's key.
+        let (impostor_intermediate, _impostor_key) = make_cert(
+            "Test Intermediate CA",
+            now - Duration::days(365),
+            now + Duration::days(365),
+            None,
+        );
+
+        let der_chain = vec![chain.leaf_der, impostor_intermediate.der().to_vec(), chain.root_der];
+        let analysis = analyze(&der_chain, now).unwrap();
+
+        assert!(matches!(analysis.hops[0].status, HopStatus::SignatureMismatch(_)));
+        assert!(!analysis.is_fully_valid());
+        assert!(analysis.verdict().starts_with("Chain: INVALID"));
+    }
+
+    #[test]
+    fn chain_without_root_and_unknown_issuer_is_untrusted() {
+        let now = OffsetDateTime::now_utc();
+        let chain = valid_test_chain(now);
+        // No root presented, and this test CA is not in the compiled-in
+        // Mozilla trust store, so the chain can't be confirmed trusted.
+        let analysis = analyze(&[chain.leaf_der, chain.intermediate_der], now).unwrap();
+
+        assert!(!analysis.reaches_trusted_root);
+        assert_eq!(analysis.hops.len(), 2);
+        assert!(matches!(analysis.hops[1].status, HopStatus::UnverifiedIssuer(_)));
+        assert_eq!(analysis.verdict(), "Chain: UNTRUSTED — no trusted root found");
+    }
+
+    #[test]
+    fn single_self_signed_cert_is_its_own_root() {
+        let now = OffsetDateTime::now_utc();
+        let (cert, _key) = make_cert(
+            "standalone.example.test",
+            now - Duration::days(1),
+            now + Duration::days(1),
+            None,
+        );
+
+        let analysis = analyze(&[cert.der().to_vec()], now).unwrap();
+
+        assert_eq!(analysis.hops.len(), 1);
+        assert_eq!(analysis.hops[0].kind, NodeKind::Root);
+        assert!(analysis.is_fully_valid());
+    }
+}
