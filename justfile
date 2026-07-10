@@ -13,6 +13,8 @@ run domain="":
     cargo run -- {{domain}}
 
 # The live TLS integration tests, which reach real hosts on the internet.
-# These are #[ignore]d by default so `just check` stays deterministic.
+# These are #[ignore]d by default so `just check` stays deterministic. Run
+# serially: several targets are badssl.com subdomains, and hitting that one
+# host with parallel connections gets them throttled.
 test-live:
-    cargo test --test tls_live -- --ignored
+    cargo test --test tls_live -- --ignored --test-threads=1

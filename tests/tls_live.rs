@@ -6,9 +6,12 @@
 // they are marked `#[ignore]` to keep the default `cargo test` run — and the CI
 // badge — deterministic. Run them explicitly with:
 //
-//     cargo test --test tls_live -- --ignored
+//     cargo test --test tls_live -- --ignored --test-threads=1
 //
-// A dedicated, non-blocking CI job runs them on every push (see ci.yml).
+// Run them serially (--test-threads=1): several targets are badssl.com
+// subdomains, and opening parallel connections to that one host gets them
+// throttled. A dedicated, non-blocking CI job runs them on every push (see
+// ci.yml).
 use porthole::chain::{HopStatus, NodeKind};
 use porthole::hsts::Hsts;
 use porthole::tls;

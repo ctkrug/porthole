@@ -50,4 +50,6 @@ jobs:
       - uses: Swatinem/rust-cache@v2
 
       - name: Live tests
-        run: cargo test --test tls_live -- --ignored
+        # Serial: several targets share badssl.com, which throttles parallel
+        # connections from one host and would flake the run.
+        run: cargo test --test tls_live -- --ignored --test-threads=1
