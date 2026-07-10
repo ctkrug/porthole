@@ -154,6 +154,16 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &App, info: &ChainInfo, dimmed:
     frame.render_widget(List::new(items), inner);
 }
 
+/// Certificate fields (subject/issuer CN, DN, serial, ...) come from
+/// whatever server Porthole connects to, including a malicious or MITM
+/// one. `CrosstermBackend` writes cell symbols to the terminal via a raw
+/// `Print` with no escaping of its own, so any control character —
+/// terminal escape sequences included — must be neutralized before this
+/// data reaches a rendered `Span`.
+fn sanitize_for_terminal(s: &str) -> String {
+    s.chars().map(|c| if c.is_control() { '\u{fffd}' } else { c }).collect()
+}
+
 fn tree_item(hop: &ChainHop, index: usize, selected: bool) -> ListItem<'static> {
     let indent = "  ".repeat(index);
     let branch = if index == 0 { "" } else { "└─ " };
@@ -171,10 +181,11 @@ fn tree_item(hop: &ChainHop, index: usize, selected: bool) -> ListItem<'static> 
 
     let mut line = format!(
         "{indent}{branch}{glyph} {} ({label}) issuer: {}",
-        hop.node.subject, hop.node.issuer
+        sanitize_for_terminal(&hop.node.subject),
+        sanitize_for_terminal(&hop.node.issuer)
     );
     if let Some(reason) = hop.status.reason() {
-        line.push_str(&format!(" — {reason}"));
+        line.push_str(&format!(" — {}", sanitize_for_terminal(reason)));
     }
     ListItem::new(Line::from(Span::styled(line, style)))
 }
@@ -329,19 +340,19 @@ fn draw_detail_overlay(frame: &mut Frame, app: &App) {
     let lines = vec![
         Line::from(vec![
             Span::styled("Subject: ", Style::default().fg(Color::Gray)),
-            Span::raw(hop.node.subject_dn.clone()),
+            Span::raw(sanitize_for_terminal(&hop.node.subject_dn)),
         ]),
         Line::from(vec![
             Span::styled("Issuer:  ", Style::default().fg(Color::Gray)),
-            Span::raw(hop.node.issuer_dn.clone()),
+            Span::raw(sanitize_for_terminal(&hop.node.issuer_dn)),
         ]),
         Line::from(vec![
             Span::styled("Serial:  ", Style::default().fg(Color::Gray)),
-            Span::raw(hop.node.serial.clone()),
+            Span::raw(sanitize_for_terminal(&hop.node.serial)),
         ]),
         Line::from(vec![
             Span::styled("Pubkey:  ", Style::default().fg(Color::Gray)),
-            Span::raw(hop.node.pubkey_algorithm.clone()),
+            Span::raw(sanitize_for_terminal(&hop.node.pubkey_algorithm)),
         ]),
         Line::from(""),
         Line::from(Span::styled("Esc to close", Style::default().fg(Color::DarkGray))),
