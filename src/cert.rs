@@ -38,7 +38,9 @@ impl CertNode {
     /// expiry date is unknown.
     pub fn expires_within(&self, now: OffsetDateTime, days: i64) -> bool {
         match self.not_after {
-            Some(not_after) => self.is_currently_valid(now) && not_after - now <= Duration::days(days),
+            Some(not_after) => {
+                self.is_currently_valid(now) && not_after - now <= Duration::days(days)
+            }
             None => false,
         }
     }
@@ -63,11 +65,7 @@ mod tests {
     }
 
     fn sample_node_without_dates() -> CertNode {
-        CertNode {
-            not_before: None,
-            not_after: None,
-            ..sample_node()
-        }
+        CertNode { not_before: None, not_after: None, ..sample_node() }
     }
 
     #[test]
