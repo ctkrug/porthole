@@ -529,6 +529,31 @@ mod tests {
     }
 
     #[test]
+    fn hop_kind_single_cert_chain_is_leaf_not_root() {
+        // index 0 always wins as Leaf, even when it's also the last cert —
+        // analyze() only ever calls hop_kind for hops it hasn't already
+        // decided are the root by other means (self-signed / known
+        // anchor), so a lone non-self-signed cert is correctly a leaf
+        // with nothing above it, not a root.
+        assert_eq!(hop_kind(0, 1), NodeKind::Leaf);
+    }
+
+    #[test]
+    fn hop_kind_first_of_many_is_leaf() {
+        assert_eq!(hop_kind(0, 3), NodeKind::Leaf);
+    }
+
+    #[test]
+    fn hop_kind_last_of_many_is_root() {
+        assert_eq!(hop_kind(2, 3), NodeKind::Root);
+    }
+
+    #[test]
+    fn hop_kind_middle_of_many_is_intermediate() {
+        assert_eq!(hop_kind(1, 3), NodeKind::Intermediate);
+    }
+
+    #[test]
     fn wrap_der_sequence_round_trips_through_der_value() {
         let value = vec![1, 2, 3, 4, 5];
         let wrapped = wrap_der_sequence(&value);
