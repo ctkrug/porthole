@@ -67,6 +67,15 @@ mod tests {
     }
 
     #[test]
+    fn max_age_directive_name_is_case_insensitive() {
+        // RFC 6797's directive names are case-insensitive, same as the
+        // header field name itself; a server sending "Max-Age" must be
+        // recognized just as reliably as the conventional lowercase form.
+        let headers = "Strict-Transport-Security: Max-Age=100";
+        assert_eq!(parse(headers), Hsts::MaxAge(100));
+    }
+
+    #[test]
     fn directive_order_does_not_matter() {
         let headers = "Strict-Transport-Security: includeSubDomains; max-age=500";
         assert_eq!(parse(headers), Hsts::MaxAge(500));
