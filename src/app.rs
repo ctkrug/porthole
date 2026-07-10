@@ -14,6 +14,11 @@ pub const REVEAL_INTERVAL: Duration = Duration::from_millis(220);
 /// giving the animation a chance to advance.
 pub const EVENT_POLL_INTERVAL: Duration = Duration::from_millis(50);
 
+/// RFC 1035 caps a full domain name at 253 characters. Input beyond that
+/// can never resolve, so there's no reason to let it grow further — it
+/// also keeps the cursor's on-screen column math well within `u16` range.
+const MAX_DOMAIN_INPUT_LEN: usize = 253;
+
 /// Which screen the TUI is currently showing.
 pub enum Screen {
     Input,
@@ -364,6 +369,16 @@ mod tests {
         assert!(app.domain.is_none());
         assert!(app.domain_input.is_empty());
         assert!(app.fetch_result.is_none());
+    }
+
+    #[test]
+    fn typing_beyond_the_max_domain_length_is_a_no_op() {
+        let mut app = App::new(None);
+        app.domain_input = "a".repeat(MAX_DOMAIN_INPUT_LEN);
+        app.input_cursor = MAX_DOMAIN_INPUT_LEN;
+        app.handle_key(key(KeyCode::Char('x')));
+        assert_eq!(app.domain_input.len(), MAX_DOMAIN_INPUT_LEN, "must not grow past the cap");
+        assert_eq!(app.input_cursor, MAX_DOMAIN_INPUT_LEN);
     }
 
     #[test]
