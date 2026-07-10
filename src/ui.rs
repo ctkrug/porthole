@@ -456,6 +456,43 @@ mod tests {
         assert_eq!(restored_fg, Color::Cyan, "border should restore once the overlay closes");
     }
 
+    /// Certificate fields (subject/issuer CN, serial, etc.) come from
+    /// whatever the connected server presents — including a malicious or
+    /// MITM one, exactly the case Porthole exists to help a user inspect.
+    /// A CN containing a raw terminal escape sequence must never reach
+    /// `CrosstermBackend`'s `Print` write un-sanitized, since that backend
+    /// writes cell symbols straight to the terminal with no escaping of
+    /// its own — this is the terminal-escape-injection equivalent of an
+    /// XSS sink, and it would be especially ironic for a security tool to
+    /// have it.
+    #[test]
+    fn malicious_certificate_fields_cannot_inject_terminal_escapes() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend should construct");
+
+        let mut app = App::new(None);
+        app.screen = Screen::Chain;
+        app.domain = Some("evil.example".to_string());
+        let malicious = "\u{1b}]0;pwned\u{7}evil.example";
+        let mut info = fake_chain_info();
+        info.analysis.hops[0].node.subject = malicious.to_string();
+        info.analysis.hops[0].node.subject_dn = malicious.to_string();
+        app.revealed = info.analysis.hops.len();
+        app.selected = 0;
+        app.fetch_result = Some(Ok(info));
+
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        app.show_detail = true;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+
+        let buffer = terminal.backend().buffer();
+        for cell in buffer.content() {
+            for ch in cell.symbol().chars() {
+                assert!(!ch.is_control(), "a raw control character reached the rendered buffer");
+            }
+        }
+    }
+
     /// Every screen/overlay combination, rendered at a spread of terminal
     /// sizes from absurdly tiny up to the documented 80x24 minimum and
     /// beyond, must not panic. This is the layout-math equivalent of a
