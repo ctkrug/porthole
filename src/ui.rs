@@ -56,7 +56,10 @@ fn draw_input(frame: &mut Frame, app: &App, dimmed: bool) {
         Line::from(""),
         Line::from(vec![
             Span::styled("  Domain: ", Style::default().fg(Color::Gray)),
-            Span::styled(app.domain_input.as_str(), Style::default().fg(Color::Cyan)),
+            Span::styled(
+                sanitize_for_terminal(&app.domain_input),
+                Style::default().fg(Color::Cyan),
+            ),
         ]),
         Line::from(""),
         Line::from(Span::styled(
