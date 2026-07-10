@@ -35,6 +35,7 @@ fn max_age_directive(header_value: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
 
     #[test]
     fn no_headers_is_not_set() {
@@ -94,5 +95,39 @@ mod tests {
     fn malformed_header_line_without_colon_is_ignored() {
         let headers = "not a real header line\r\nStrict-Transport-Security: max-age=10";
         assert_eq!(parse(headers), Hsts::MaxAge(10));
+    }
+
+    #[test]
+    fn max_age_overflowing_u64_is_not_set_rather_than_panicking() {
+        let headers = "Strict-Transport-Security: max-age=999999999999999999999999999999";
+        assert_eq!(parse(headers), Hsts::NotSet);
+    }
+
+    proptest! {
+        /// `parse` receives raw, attacker-controlled bytes off the wire —
+        /// it must never panic, regardless of headers, casing, stray CR/LF,
+        /// or non-ASCII content.
+        #[test]
+        fn parse_never_panics_on_arbitrary_input(headers in ".*") {
+            let _ = parse(&headers);
+        }
+
+        /// Any header block that genuinely contains a well-formed
+        /// `max-age=<digits>` directive must be recognized, whatever
+        /// surrounds it on the line or in the rest of the header block.
+        /// `prefix`/`suffix` are letters-and-spaces only so they can never
+        /// themselves look like a competing directive or extend the digit
+        /// run being asserted on.
+        #[test]
+        fn any_valid_max_age_directive_is_found(
+            age in 0u64..=1_000_000_000,
+            prefix in "[a-zA-Z ]{0,20}",
+            suffix in "[a-zA-Z ]{0,20}",
+        ) {
+            let headers = format!(
+                "{prefix}\r\nStrict-Transport-Security: max-age={age}; {suffix}\r\n"
+            );
+            prop_assert_eq!(parse(&headers), Hsts::MaxAge(age));
+        }
     }
 }
