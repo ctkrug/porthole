@@ -1,5 +1,6 @@
 mod app;
 mod cert;
+mod chain;
 mod tls;
 mod ui;
 
