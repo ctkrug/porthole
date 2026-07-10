@@ -1,6 +1,10 @@
 use time::{Duration, OffsetDateTime};
 
 /// A single certificate in a chain, as parsed for display and validation.
+///
+/// `not_before`/`not_after` are `None` for a synthetic trust-anchor root
+/// node, which is sourced from the system trust store rather than a full
+/// presented certificate and so has no validity window to display.
 #[derive(Debug, Clone)]
 pub struct CertNode {
     /// Common name of the subject, falling back to the full subject DN if
@@ -12,17 +16,17 @@ pub struct CertNode {
     pub issuer_dn: String,
     pub serial: String,
     pub pubkey_algorithm: String,
-    pub not_before: OffsetDateTime,
-    pub not_after: OffsetDateTime,
+    pub not_before: Option<OffsetDateTime>,
+    pub not_after: Option<OffsetDateTime>,
 }
 
 impl CertNode {
     pub fn is_expired(&self, now: OffsetDateTime) -> bool {
-        now > self.not_after
+        self.not_after.is_some_and(|not_after| now > not_after)
     }
 
     pub fn is_not_yet_valid(&self, now: OffsetDateTime) -> bool {
-        now < self.not_before
+        self.not_before.is_some_and(|not_before| now < not_before)
     }
 
     pub fn is_currently_valid(&self, now: OffsetDateTime) -> bool {
@@ -30,9 +34,13 @@ impl CertNode {
     }
 
     /// True if the cert is currently valid but will expire within `days`
-    /// days of `now` — the "urgent" expiry window.
+    /// days of `now` — the "urgent" expiry window. Always false when the
+    /// expiry date is unknown.
     pub fn expires_within(&self, now: OffsetDateTime, days: i64) -> bool {
-        self.is_currently_valid(now) && self.not_after - now <= Duration::days(days)
+        match self.not_after {
+            Some(not_after) => self.is_currently_valid(now) && not_after - now <= Duration::days(days),
+            None => false,
+        }
     }
 }
 
@@ -49,8 +57,16 @@ mod tests {
             issuer_dn: "CN=Example CA".to_string(),
             serial: "01".to_string(),
             pubkey_algorithm: "RSA".to_string(),
-            not_before: datetime!(2026-01-01 0:00 UTC),
-            not_after: datetime!(2027-01-01 0:00 UTC),
+            not_before: Some(datetime!(2026-01-01 0:00 UTC)),
+            not_after: Some(datetime!(2027-01-01 0:00 UTC)),
+        }
+    }
+
+    fn sample_node_without_dates() -> CertNode {
+        CertNode {
+            not_before: None,
+            not_after: None,
+            ..sample_node()
         }
     }
 
@@ -104,5 +120,15 @@ mod tests {
     fn expires_within_false_when_already_expired() {
         let node = sample_node();
         assert!(!node.expires_within(datetime!(2027-06-01 0:00 UTC), 14));
+    }
+
+    #[test]
+    fn no_dates_is_always_currently_valid_and_never_urgent() {
+        let node = sample_node_without_dates();
+        let now = datetime!(2026-06-01 0:00 UTC);
+        assert!(node.is_currently_valid(now));
+        assert!(!node.is_expired(now));
+        assert!(!node.is_not_yet_valid(now));
+        assert!(!node.expires_within(now, 14));
     }
 }
