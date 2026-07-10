@@ -28,7 +28,10 @@ fn max_age_directive(header_value: &str) -> Option<u64> {
     header_value
         .split(';')
         .map(str::trim)
-        .find_map(|directive| directive.strip_prefix("max-age="))
+        .find_map(|directive| {
+            let (name, age) = directive.split_once('=')?;
+            name.trim().eq_ignore_ascii_case("max-age").then_some(age)
+        })
         .and_then(|age| age.trim().parse().ok())
 }
 
