@@ -179,3 +179,181 @@ impl App {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    fn chain_screen_app(revealed: usize) -> App {
+        let mut app = App::new(None);
+        app.screen = Screen::Chain;
+        app.revealed = revealed;
+        app
+    }
+
+    #[test]
+    fn typing_inserts_at_cursor_and_advances_it() {
+        let mut app = App::new(None);
+        app.handle_key(key(KeyCode::Char('a')));
+        app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.domain_input, "ab");
+        assert_eq!(app.input_cursor, 2);
+    }
+
+    #[test]
+    fn typing_inserts_in_the_middle_not_just_at_the_end() {
+        let mut app = App::new(None);
+        app.domain_input = "ac".to_string();
+        app.input_cursor = 1;
+        app.handle_key(key(KeyCode::Char('b')));
+        assert_eq!(app.domain_input, "abc");
+        assert_eq!(app.input_cursor, 2);
+    }
+
+    #[test]
+    fn backspace_removes_char_before_cursor() {
+        let mut app = App::new(None);
+        app.domain_input = "abc".to_string();
+        app.input_cursor = 2;
+        app.handle_key(key(KeyCode::Backspace));
+        assert_eq!(app.domain_input, "ac");
+        assert_eq!(app.input_cursor, 1);
+    }
+
+    #[test]
+    fn backspace_at_start_is_a_no_op() {
+        let mut app = App::new(None);
+        app.domain_input = "abc".to_string();
+        app.input_cursor = 0;
+        app.handle_key(key(KeyCode::Backspace));
+        assert_eq!(app.domain_input, "abc");
+        assert_eq!(app.input_cursor, 0);
+    }
+
+    #[test]
+    fn left_and_right_move_the_cursor_and_clamp_at_the_edges() {
+        let mut app = App::new(None);
+        app.domain_input = "ab".to_string();
+        app.input_cursor = 0;
+
+        app.handle_key(key(KeyCode::Left));
+        assert_eq!(app.input_cursor, 0, "must not go below zero");
+
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Right));
+        app.handle_key(key(KeyCode::Right));
+        assert_eq!(app.input_cursor, 2, "must not exceed the input length");
+    }
+
+    #[test]
+    fn enter_on_empty_input_does_not_start_a_lookup() {
+        let mut app = App::new(None);
+        app.handle_key(key(KeyCode::Enter));
+        assert!(matches!(app.screen, Screen::Input));
+        assert!(app.fetch_result.is_none());
+    }
+
+    #[test]
+    fn esc_on_input_screen_quits() {
+        let mut app = App::new(None);
+        app.handle_key(key(KeyCode::Esc));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn ctrl_c_quits_from_any_screen() {
+        let mut app = App::new(None);
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn help_overlay_toggles_and_any_key_dismisses_without_leaking_through() {
+        let mut app = App::new(None);
+        app.handle_key(key(KeyCode::Char('?')));
+        assert!(app.show_help);
+
+        app.handle_key(key(KeyCode::Char('x')));
+        assert!(!app.show_help);
+        // the dismiss keypress must not also have been typed into the input
+        assert!(app.domain_input.is_empty());
+    }
+
+    #[test]
+    fn arrow_down_selects_next_node_and_clamps_to_revealed_count() {
+        let mut app = chain_screen_app(2);
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.selected, 1);
+
+        // only indices 0..1 are revealed — must not select past that
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(app.selected, 1);
+    }
+
+    #[test]
+    fn arrow_up_does_not_go_below_zero() {
+        let mut app = chain_screen_app(2);
+        app.handle_key(key(KeyCode::Up));
+        assert_eq!(app.selected, 0);
+    }
+
+    #[test]
+    fn enter_opens_detail_only_once_a_node_is_revealed() {
+        let mut app = chain_screen_app(0);
+        app.handle_key(key(KeyCode::Enter));
+        assert!(!app.show_detail);
+
+        app.revealed = 1;
+        app.handle_key(key(KeyCode::Enter));
+        assert!(app.show_detail);
+    }
+
+    #[test]
+    fn esc_closes_detail_without_quitting() {
+        let mut app = chain_screen_app(1);
+        app.show_detail = true;
+        app.handle_key(key(KeyCode::Esc));
+        assert!(!app.show_detail);
+        assert!(!app.should_quit);
+    }
+
+    #[test]
+    fn q_quits_from_the_chain_screen_but_not_while_detail_is_open() {
+        let mut app = chain_screen_app(1);
+        app.show_detail = true;
+        app.handle_key(key(KeyCode::Char('q')));
+        assert!(!app.should_quit, "q while the detail pane is open should be a no-op");
+
+        app.show_detail = false;
+        app.handle_key(key(KeyCode::Char('q')));
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn n_key_returns_to_input_screen_and_clears_state() {
+        let mut app = chain_screen_app(2);
+        app.selected = 1;
+        app.domain = Some("example.com".to_string());
+        app.domain_input = "example.com".to_string();
+
+        app.handle_key(key(KeyCode::Char('n')));
+
+        assert!(matches!(app.screen, Screen::Input));
+        assert_eq!(app.revealed, 0);
+        assert_eq!(app.selected, 0);
+        assert!(app.domain.is_none());
+        assert!(app.domain_input.is_empty());
+        assert!(app.fetch_result.is_none());
+    }
+
+    #[test]
+    fn tick_reveals_nothing_without_a_fetch_result() {
+        let mut app = App::new(None);
+        app.tick();
+        assert_eq!(app.revealed, 0);
+    }
+}
