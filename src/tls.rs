@@ -218,4 +218,14 @@ mod tests {
     fn server_name_rejects_empty_string() {
         assert!(ServerName::try_from(String::new()).is_err());
     }
+
+    /// A user typing a non-ASCII domain (e.g. an IDN like "日本語.com")
+    /// gets `fetch_chain`'s "'{domain}' is not a valid domain name" error
+    /// rather than a raw library panic — Porthole doesn't do punycode
+    /// conversion, so this is a real, if narrow, current limitation, not
+    /// just a defensive edge case.
+    #[test]
+    fn server_name_rejects_non_ascii_domain_names() {
+        assert!(ServerName::try_from("日本語.com".to_string()).is_err());
+    }
 }
