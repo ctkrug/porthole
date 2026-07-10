@@ -36,20 +36,13 @@ fn main() -> anyhow::Result<()> {
     let result = run(&mut terminal, &mut app);
 
     disable_raw_mode()?;
-    execute!(
-        terminal.backend_mut(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    )?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
 
     result
 }
 
-fn run(
-    terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
-    app: &mut App,
-) -> anyhow::Result<()> {
+fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> anyhow::Result<()> {
     while !app.should_quit {
         terminal.draw(|frame| ui::draw(frame, app))?;
         app.handle_event()?;

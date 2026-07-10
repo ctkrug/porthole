@@ -16,7 +16,6 @@ pub struct ChainInfo {
 ///
 /// Not yet implemented — the handshake and chain capture land in the
 /// BUILD phase (see docs/BACKLOG.md, Epic 1).
-#[allow(dead_code)]
 pub fn fetch_chain(_domain: &str) -> Result<ChainInfo> {
     bail!("TLS chain fetch is not implemented yet")
 }

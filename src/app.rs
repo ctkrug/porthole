@@ -2,6 +2,8 @@ use std::io;
 
 use crossterm::event::{self, Event, KeyCode};
 
+use crate::tls::{self, ChainInfo};
+
 /// Which screen the TUI is currently showing.
 pub enum Screen {
     Input,
@@ -12,22 +14,28 @@ pub struct App {
     pub screen: Screen,
     pub domain_input: String,
     pub domain: Option<String>,
+    pub fetch_result: Option<Result<ChainInfo, String>>,
     pub should_quit: bool,
 }
 
 impl App {
     pub fn new(initial_domain: Option<String>) -> Self {
         match initial_domain {
-            Some(domain) => Self {
-                screen: Screen::Chain,
-                domain_input: String::new(),
-                domain: Some(domain),
-                should_quit: false,
-            },
+            Some(domain) => {
+                let fetch_result = Some(tls::fetch_chain(&domain).map_err(|e| e.to_string()));
+                Self {
+                    screen: Screen::Chain,
+                    domain_input: String::new(),
+                    domain: Some(domain),
+                    fetch_result,
+                    should_quit: false,
+                }
+            }
             None => Self {
                 screen: Screen::Input,
                 domain_input: String::new(),
                 domain: None,
+                fetch_result: None,
                 should_quit: false,
             },
         }
@@ -42,6 +50,8 @@ impl App {
         match self.screen {
             Screen::Input => match key.code {
                 KeyCode::Enter if !self.domain_input.is_empty() => {
+                    self.fetch_result =
+                        Some(tls::fetch_chain(&self.domain_input).map_err(|e| e.to_string()));
                     self.domain = Some(self.domain_input.clone());
                     self.screen = Screen::Chain;
                 }
@@ -57,6 +67,7 @@ impl App {
                 KeyCode::Char('n') => {
                     self.domain = None;
                     self.domain_input.clear();
+                    self.fetch_result = None;
                     self.screen = Screen::Input;
                 }
                 _ => {}
