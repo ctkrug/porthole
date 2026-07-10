@@ -1,3 +1,4 @@
+use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,8 +11,13 @@ use rustls::{ClientConfig, ClientConnection, DigitallySignedStruct, SignatureSch
 use time::OffsetDateTime;
 
 use crate::chain::{self, ChainAnalysis};
+use crate::hsts::{self, Hsts};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(8);
+
+/// Cap on how many header bytes we'll read before giving up on finding
+/// the blank line that ends the response headers.
+const MAX_HEADER_BYTES: usize = 16 * 1024;
 
 /// The result of connecting to a domain: the validated certificate chain
 /// plus the negotiated protocol/cipher suite.
@@ -20,6 +26,7 @@ pub struct ChainInfo {
     pub analysis: ChainAnalysis,
     pub protocol_version: String,
     pub cipher_suite: String,
+    pub hsts: Hsts,
 }
 
 /// Open a TLS connection to `domain:443` and capture the presented
@@ -83,7 +90,49 @@ pub fn fetch_chain(domain: &str) -> Result<ChainInfo> {
     let analysis = chain::analyze(&der_chain, OffsetDateTime::now_utc())
         .map_err(|e| anyhow!("failed to analyze the certificate chain: {e}"))?;
 
-    Ok(ChainInfo { analysis, protocol_version, cipher_suite })
+    // HSTS is a nice-to-have alongside the chain result: a slow or
+    // unresponsive origin here shouldn't fail a lookup that already
+    // successfully captured and validated the certificate chain.
+    let hsts = fetch_response_headers(&mut tls, domain)
+        .map(|headers| hsts::parse(&headers))
+        .unwrap_or(Hsts::NotSet);
+
+    Ok(ChainInfo { analysis, protocol_version, cipher_suite, hsts })
+}
+
+/// Issue a minimal HTTP/1.1 GET over the already-established TLS stream
+/// and return the raw response header block (everything before the first
+/// blank line), best-effort. Returns `None` on any I/O or protocol
+/// hiccup rather than failing the whole lookup.
+fn fetch_response_headers(
+    tls: &mut StreamOwned<ClientConnection, TcpStream>,
+    domain: &str,
+) -> Option<String> {
+    let request = format!(
+        "GET / HTTP/1.1\r\nHost: {domain}\r\nConnection: close\r\nUser-Agent: porthole/0.1\r\n\r\n"
+    );
+    tls.write_all(request.as_bytes()).ok()?;
+
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 1024];
+    loop {
+        match tls.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.windows(4).any(|window| window == b"\r\n\r\n")
+                    || buf.len() >= MAX_HEADER_BYTES
+                {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    let text = String::from_utf8_lossy(&buf);
+    let headers = text.split("\r\n\r\n").next().unwrap_or(&text);
+    Some(headers.to_string())
 }
 
 fn protocol_version_name(version: rustls::ProtocolVersion) -> String {

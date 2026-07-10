@@ -7,6 +7,7 @@ use ratatui::Frame;
 use crate::app::{App, Screen};
 use crate::cert::CertNode;
 use crate::chain::{ChainHop, HopStatus, NodeKind};
+use crate::hsts::Hsts;
 use crate::tls::ChainInfo;
 
 const URGENT_EXPIRY_DAYS: i64 = 14;
@@ -220,7 +221,23 @@ fn draw_side_panel(frame: &mut Frame, area: Rect, info: &ChainInfo) {
         lines.push(expiry_line(&leaf.node));
     }
 
+    lines.push(Line::from(""));
+    lines.push(hsts_line(info.hsts));
+
     frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: true }), inner);
+}
+
+fn hsts_line(hsts: Hsts) -> Line<'static> {
+    match hsts {
+        Hsts::MaxAge(max_age) => Line::from(vec![
+            Span::styled("HSTS: ", Style::default().fg(Color::Gray)),
+            Span::styled(format!("max-age={max_age}"), Style::default().fg(Color::Green)),
+        ]),
+        Hsts::NotSet => Line::from(vec![
+            Span::styled("HSTS: ", Style::default().fg(Color::Gray)),
+            Span::styled("not set", Style::default().fg(Color::DarkGray)),
+        ]),
+    }
 }
 
 fn expiry_line(node: &CertNode) -> Line<'static> {

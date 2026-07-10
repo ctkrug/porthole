@@ -2,6 +2,7 @@
 // and exercises the full fetch -> parse -> validate pipeline end to end.
 // Requires outbound TLS to the public internet on port 443.
 use porthole::chain::NodeKind;
+use porthole::hsts::Hsts;
 use porthole::tls;
 
 #[test]
@@ -21,6 +22,15 @@ fn google_com_chain_resolves_to_a_trusted_root() {
     assert!(info.analysis.reaches_trusted_root);
     assert!(info.analysis.is_fully_valid());
     assert_eq!(info.analysis.verdict(), "Chain: VALID");
+}
+
+#[test]
+fn github_com_sends_hsts() {
+    // github.com's root response reliably carries Strict-Transport-Security;
+    // a NotSet result here would mean the header-fetch path is broken, not
+    // that the origin opted out.
+    let info = tls::fetch_chain("github.com").expect("live TLS fetch to github.com");
+    assert!(matches!(info.hsts, Hsts::MaxAge(_)));
 }
 
 #[test]
