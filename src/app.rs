@@ -119,6 +119,19 @@ impl App {
         }
     }
 
+    /// Byte offset of the `nth` character in `domain_input`, or its byte
+    /// length if `nth` is at or past the end. `input_cursor` is a *char*
+    /// index (so arrow-key math stays simple even with multi-byte input),
+    /// but `String::insert`/`remove` require a byte offset — this bridges
+    /// the two without ever handing them a non-boundary index.
+    fn cursor_byte_offset(&self, nth: usize) -> usize {
+        self.domain_input
+            .char_indices()
+            .nth(nth)
+            .map(|(byte_idx, _)| byte_idx)
+            .unwrap_or(self.domain_input.len())
+    }
+
     fn handle_input_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Enter if !self.domain_input.is_empty() => {
@@ -126,20 +139,23 @@ impl App {
                 self.start_lookup(domain);
             }
             KeyCode::Char(c) => {
-                self.domain_input.insert(self.input_cursor, c);
+                let byte_idx = self.cursor_byte_offset(self.input_cursor);
+                self.domain_input.insert(byte_idx, c);
                 self.input_cursor += 1;
             }
             KeyCode::Backspace => {
                 if self.input_cursor > 0 {
                     self.input_cursor -= 1;
-                    self.domain_input.remove(self.input_cursor);
+                    let byte_idx = self.cursor_byte_offset(self.input_cursor);
+                    self.domain_input.remove(byte_idx);
                 }
             }
             KeyCode::Left => {
                 self.input_cursor = self.input_cursor.saturating_sub(1);
             }
             KeyCode::Right => {
-                self.input_cursor = (self.input_cursor + 1).min(self.domain_input.len());
+                let char_count = self.domain_input.chars().count();
+                self.input_cursor = (self.input_cursor + 1).min(char_count);
             }
             KeyCode::Esc => self.should_quit = true,
             _ => {}
