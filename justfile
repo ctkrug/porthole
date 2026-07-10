@@ -11,3 +11,7 @@ fmt:
 
 run domain="":
     cargo run -- {{domain}}
+
+# Unit tests only — no outbound network required (skips tests/tls_live.rs)
+test-unit:
+    cargo test --bins --lib
