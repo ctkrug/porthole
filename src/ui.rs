@@ -8,7 +8,7 @@ use ratatui::Frame;
 
 use crate::app::{App, Screen};
 use crate::cert::CertNode;
-use crate::chain::{ChainHop, HopStatus, NodeKind};
+use crate::chain::{ChainAnalysis, ChainHop, HopStatus, NodeKind};
 use crate::hsts::Hsts;
 use crate::tls::ChainInfo;
 
@@ -205,7 +205,7 @@ fn status_glyph_and_color(status: &HopStatus) -> (&'static str, Color) {
     }
 }
 
-fn verdict_style(analysis: &crate::chain::ChainAnalysis) -> Style {
+fn verdict_style(analysis: &ChainAnalysis) -> Style {
     if analysis.is_fully_valid() {
         Style::default().fg(Color::Green).add_modifier(Modifier::BOLD)
     } else {
