@@ -13,9 +13,13 @@ use crate::tls::ChainInfo;
 const URGENT_EXPIRY_DAYS: i64 = 14;
 
 pub fn draw(frame: &mut Frame, app: &App) {
+    // An open overlay dims the surface beneath it so the active surface
+    // reads as unambiguous, per docs/DESIGN.md's interaction states.
+    let dimmed = app.show_help || app.show_detail;
+
     match app.screen {
-        Screen::Input => draw_input(frame, app),
-        Screen::Chain => draw_chain(frame, app),
+        Screen::Input => draw_input(frame, app, dimmed),
+        Screen::Chain => draw_chain(frame, app, dimmed),
     }
 
     if app.show_help {
@@ -25,11 +29,21 @@ pub fn draw(frame: &mut Frame, app: &App) {
     }
 }
 
-fn draw_input(frame: &mut Frame, app: &App) {
+/// The chrome color for a pane's border: the normal accent color, or a
+/// lower-emphasis one while an overlay dims this surface.
+fn chrome_color(dimmed: bool) -> Color {
+    if dimmed {
+        Color::DarkGray
+    } else {
+        Color::Cyan
+    }
+}
+
+fn draw_input(frame: &mut Frame, app: &App, dimmed: bool) {
     let area = frame.area();
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(chrome_color(dimmed)))
         .title(" Porthole ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -57,7 +71,7 @@ fn draw_input(frame: &mut Frame, app: &App) {
     frame.set_cursor_position((cursor_x, cursor_y));
 }
 
-fn draw_chain(frame: &mut Frame, app: &App) {
+fn draw_chain(frame: &mut Frame, app: &App, dimmed: bool) {
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
@@ -65,22 +79,27 @@ fn draw_chain(frame: &mut Frame, app: &App) {
 
     match &app.fetch_result {
         Some(Ok(info)) => {
-            draw_tree(frame, columns[0], app, info);
-            draw_side_panel(frame, columns[1], info);
+            draw_tree(frame, columns[0], app, info, dimmed);
+            draw_side_panel(frame, columns[1], info, dimmed);
         }
-        Some(Err(message)) => draw_error(frame, frame.area(), app.domain.as_deref(), message),
-        None => draw_error(frame, frame.area(), app.domain.as_deref(), "no lookup in progress"),
+        Some(Err(message)) => {
+            draw_error(frame, frame.area(), app.domain.as_deref(), message, dimmed);
+        }
+        None => {
+            draw_error(frame, frame.area(), app.domain.as_deref(), "no lookup in progress", dimmed);
+        }
     }
 }
 
-fn draw_error(frame: &mut Frame, area: Rect, domain: Option<&str>, message: &str) {
+fn draw_error(frame: &mut Frame, area: Rect, domain: Option<&str>, message: &str, dimmed: bool) {
     let title = match domain {
         Some(domain) => format!(" Porthole — {domain} "),
         None => " Porthole ".to_string(),
     };
+    let border_color = if dimmed { Color::DarkGray } else { Color::Red };
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Red))
+        .border_style(Style::default().fg(border_color))
         .title(title);
     let text = vec![
         Line::from(Span::styled(
@@ -98,10 +117,10 @@ fn draw_error(frame: &mut Frame, area: Rect, domain: Option<&str>, message: &str
     frame.render_widget(Paragraph::new(text).wrap(Wrap { trim: true }).block(block), area);
 }
 
-fn draw_tree(frame: &mut Frame, area: Rect, app: &App, info: &ChainInfo) {
+fn draw_tree(frame: &mut Frame, area: Rect, app: &App, info: &ChainInfo, dimmed: bool) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(chrome_color(dimmed)))
         .title(format!(" {} ", app.domain.as_deref().unwrap_or("")));
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -178,10 +197,10 @@ fn verdict_style(analysis: &crate::chain::ChainAnalysis) -> Style {
     }
 }
 
-fn draw_side_panel(frame: &mut Frame, area: Rect, info: &ChainInfo) {
+fn draw_side_panel(frame: &mut Frame, area: Rect, info: &ChainInfo, dimmed: bool) {
     let block = Block::default()
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan))
+        .border_style(Style::default().fg(chrome_color(dimmed)))
         .title(" Connection ");
     let inner = block.inner(area);
     frame.render_widget(block, area);
@@ -395,6 +414,46 @@ mod tests {
             cipher_suite: "TLS13_AES_256_GCM_SHA384".to_string(),
             hsts: Hsts::MaxAge(63_072_000),
         }
+    }
+
+    /// docs/DESIGN.md: "The help overlay (?) and node detail pane both dim
+    /// the underlying tree ... so the active surface is unambiguous." The
+    /// chain pane's border must switch from the normal Cyan accent to a
+    /// lower-emphasis DarkGray while either overlay is open, and back once
+    /// it closes.
+    #[test]
+    fn detail_overlay_dims_the_underlying_tree_border() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend should construct");
+
+        let mut app = App::new(None);
+        app.screen = Screen::Chain;
+        app.domain = Some("example.com".to_string());
+        let info = fake_chain_info();
+        app.revealed = info.analysis.hops.len();
+        app.fetch_result = Some(Ok(info));
+
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let border_fg = terminal.backend().buffer().cell((0, 0)).unwrap().fg;
+        assert_eq!(
+            border_fg,
+            Color::Cyan,
+            "border should be the normal accent with no overlay open"
+        );
+
+        app.show_detail = true;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let dimmed_fg = terminal.backend().buffer().cell((0, 0)).unwrap().fg;
+        assert_eq!(
+            dimmed_fg,
+            Color::DarkGray,
+            "border should dim while the detail overlay is open"
+        );
+
+        app.show_detail = false;
+        terminal.draw(|f| draw(f, &app)).unwrap();
+        let restored_fg = terminal.backend().buffer().cell((0, 0)).unwrap().fg;
+        assert_eq!(restored_fg, Color::Cyan, "border should restore once the overlay closes");
     }
 
     /// Every screen/overlay combination, rendered at a spread of terminal
