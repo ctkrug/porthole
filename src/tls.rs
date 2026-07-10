@@ -191,3 +191,31 @@ impl ServerCertVerifier for ChainCapturingVerifier {
         self.supported.supported_schemes()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use rustls::pki_types::ServerName;
+
+    /// `domain` flows unescaped into the `Host:` header written by
+    /// `fetch_response_headers`, so a value containing CR/LF could smuggle
+    /// extra request headers into the connection Porthole opens. This
+    /// guards that `ServerName::try_from` — checked before any I/O happens
+    /// in `fetch_chain` — rejects such input rather than silently passing
+    /// it through to the socket.
+    #[test]
+    fn server_name_rejects_header_injection_attempts() {
+        assert!(ServerName::try_from("example.com\r\nX-Injected: 1".to_string()).is_err());
+        assert!(ServerName::try_from("example.com\r\nHost: evil.com".to_string()).is_err());
+    }
+
+    #[test]
+    fn server_name_rejects_embedded_whitespace_and_nul() {
+        assert!(ServerName::try_from("exa mple.com".to_string()).is_err());
+        assert!(ServerName::try_from("a\0b.com".to_string()).is_err());
+    }
+
+    #[test]
+    fn server_name_rejects_empty_string() {
+        assert!(ServerName::try_from(String::new()).is_err());
+    }
+}
