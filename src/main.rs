@@ -22,6 +22,7 @@ struct Cli {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
+    install_panic_hook();
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
@@ -41,7 +42,20 @@ fn main() -> anyhow::Result<()> {
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> anyhow::Result<()> {
     while !app.should_quit {
         terminal.draw(|frame| ui::draw(frame, app))?;
+        app.tick();
         app.handle_event()?;
     }
     Ok(())
+}
+
+/// Restore the terminal to its normal state before a panic's message is
+/// printed, so a crash never leaves the user's shell stuck in raw mode
+/// inside the alternate screen.
+fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        default_hook(info);
+    }));
 }
