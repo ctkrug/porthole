@@ -1,7 +1,7 @@
 // A real network integration test: connects to a well-known, stable domain
 // and exercises the full fetch -> parse -> validate pipeline end to end.
 // Requires outbound TLS to the public internet on port 443.
-use porthole::chain::NodeKind;
+use porthole::chain::{HopStatus, NodeKind};
 use porthole::hsts::Hsts;
 use porthole::tls;
 
@@ -58,6 +58,19 @@ fn chain_with_omitted_root_labels_only_one_hop_as_root() {
     for hop in &info.analysis.hops[..info.analysis.hops.len() - 1] {
         assert_ne!(hop.kind, NodeKind::Root, "only the last hop may be labeled Root: {hop:#?}");
     }
+}
+
+#[test]
+fn expired_leaf_is_flagged_and_chain_verdict_is_invalid() {
+    // badssl.com maintains this domain specifically so tools like Porthole
+    // have a stable target with a genuinely, permanently expired leaf.
+    let info =
+        tls::fetch_chain("expired.badssl.com").expect("live TLS fetch to expired.badssl.com");
+
+    assert_eq!(info.analysis.hops[0].kind, NodeKind::Leaf);
+    assert_eq!(info.analysis.hops[0].status, HopStatus::Expired);
+    assert!(!info.analysis.is_fully_valid());
+    assert!(info.analysis.verdict().starts_with("Chain: INVALID"));
 }
 
 #[test]
