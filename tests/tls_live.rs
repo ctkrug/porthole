@@ -1,11 +1,20 @@
-// A real network integration test: connects to a well-known, stable domain
-// and exercises the full fetch -> parse -> validate pipeline end to end.
-// Requires outbound TLS to the public internet on port 443.
+// Real network integration tests: connect to well-known, stable domains and
+// exercise the full fetch -> parse -> validate pipeline end to end.
+//
+// These require outbound TLS to the public internet on port 443 and depend on
+// third-party hosts (google.com, github.com, badssl.com) staying reachable, so
+// they are marked `#[ignore]` to keep the default `cargo test` run — and the CI
+// badge — deterministic. Run them explicitly with:
+//
+//     cargo test --test tls_live -- --ignored
+//
+// A dedicated, non-blocking CI job runs them on every push (see ci.yml).
 use porthole::chain::{HopStatus, NodeKind};
 use porthole::hsts::Hsts;
 use porthole::tls;
 
 #[test]
+#[ignore = "hits the public internet; run with: cargo test -- --ignored"]
 fn google_com_chain_resolves_to_a_trusted_root() {
     let info = tls::fetch_chain("www.google.com").expect("live TLS fetch to www.google.com");
 
@@ -25,6 +34,7 @@ fn google_com_chain_resolves_to_a_trusted_root() {
 }
 
 #[test]
+#[ignore = "hits the public internet; run with: cargo test -- --ignored"]
 fn github_com_sends_hsts() {
     // github.com's root response reliably carries Strict-Transport-Security;
     // a NotSet result here would mean the header-fetch path is broken, not
@@ -34,6 +44,7 @@ fn github_com_sends_hsts() {
 }
 
 #[test]
+#[ignore = "hits the public internet; run with: cargo test -- --ignored"]
 fn chain_with_omitted_root_labels_only_one_hop_as_root() {
     // wrong.host.badssl.com serves a Let's Encrypt leaf + its R-series
     // intermediate, but (correctly, per TLS best practice) does not send
@@ -61,6 +72,7 @@ fn chain_with_omitted_root_labels_only_one_hop_as_root() {
 }
 
 #[test]
+#[ignore = "hits the public internet; run with: cargo test -- --ignored"]
 fn expired_leaf_is_flagged_and_chain_verdict_is_invalid() {
     // badssl.com maintains this domain specifically so tools like Porthole
     // have a stable target with a genuinely, permanently expired leaf.
@@ -74,6 +86,7 @@ fn expired_leaf_is_flagged_and_chain_verdict_is_invalid() {
 }
 
 #[test]
+#[ignore = "hits the public internet; run with: cargo test -- --ignored"]
 fn self_signed_chain_is_cryptographically_valid_but_untrusted() {
     let info = tls::fetch_chain("self-signed.badssl.com")
         .expect("live TLS fetch to self-signed.badssl.com");
@@ -89,6 +102,7 @@ fn self_signed_chain_is_cryptographically_valid_but_untrusted() {
 }
 
 #[test]
+#[ignore = "hits the public internet; run with: cargo test -- --ignored"]
 fn untrusted_root_chain_is_flagged_untrusted_not_valid() {
     // untrusted-root.badssl.com presents a full leaf -> root chain, but the
     // root is a CA no real trust store (including webpki-roots) recognizes.
@@ -101,6 +115,7 @@ fn untrusted_root_chain_is_flagged_untrusted_not_valid() {
 }
 
 #[test]
+#[ignore = "hits the public internet; run with: cargo test -- --ignored"]
 fn unresolvable_domain_fails_gracefully() {
     let err = tls::fetch_chain("this-domain-does-not-exist-porthole-test.invalid")
         .expect_err("nonexistent domain must not succeed");
