@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -188,7 +190,7 @@ fn tree_item(hop: &ChainHop, index: usize, selected: bool) -> ListItem<'static> 
         sanitize_for_terminal(&hop.node.issuer)
     );
     if let Some(reason) = hop.status.reason() {
-        line.push_str(&format!(" — {}", sanitize_for_terminal(reason)));
+        let _ = write!(line, " — {}", sanitize_for_terminal(reason));
     }
     ListItem::new(Line::from(Span::styled(line, style)))
 }
