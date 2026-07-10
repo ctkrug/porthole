@@ -34,6 +34,29 @@ fn github_com_sends_hsts() {
 }
 
 #[test]
+fn chain_with_omitted_root_labels_only_one_hop_as_root() {
+    // wrong.host.badssl.com serves a Let's Encrypt leaf + its R-series
+    // intermediate, but (correctly, per TLS best practice) does not send
+    // ISRG Root X1 itself — so Porthole must resolve the root by trust-store
+    // lookup rather than finding it already in the presented chain. That
+    // code path (chain::analyze's `find_trust_anchor_spki` branch) once
+    // mislabeled the *presented* intermediate as `Root` too, because it
+    // reused the presented-chain-position heuristic instead of recognizing
+    // that a synthetic root hop was about to be appended after it.
+    let info =
+        tls::fetch_chain("wrong.host.badssl.com").expect("live TLS fetch to wrong.host.badssl.com");
+
+    let root_hops = info.analysis.hops.iter().filter(|hop| hop.kind == NodeKind::Root).count();
+    assert_eq!(root_hops, 1, "exactly one hop should be labeled as the root: {:#?}", info.analysis.hops);
+
+    let last = info.analysis.hops.last().expect("at least one hop");
+    assert_eq!(last.kind, NodeKind::Root);
+    for hop in &info.analysis.hops[..info.analysis.hops.len() - 1] {
+        assert_ne!(hop.kind, NodeKind::Root, "only the last hop may be labeled Root: {hop:#?}");
+    }
+}
+
+#[test]
 fn unresolvable_domain_fails_gracefully() {
     let err = tls::fetch_chain("this-domain-does-not-exist-porthole-test.invalid")
         .expect_err("nonexistent domain must not succeed");
