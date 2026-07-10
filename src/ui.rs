@@ -93,7 +93,7 @@ fn draw_chain(frame: &mut Frame, app: &App, dimmed: bool) {
 
 fn draw_error(frame: &mut Frame, area: Rect, domain: Option<&str>, message: &str, dimmed: bool) {
     let title = match domain {
-        Some(domain) => format!(" Porthole — {domain} "),
+        Some(domain) => format!(" Porthole — {} ", sanitize_for_terminal(domain)),
         None => " Porthole ".to_string(),
     };
     let border_color = if dimmed { Color::DarkGray } else { Color::Red };
@@ -107,7 +107,7 @@ fn draw_error(frame: &mut Frame, area: Rect, domain: Option<&str>, message: &str
             Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
         )),
         Line::from(""),
-        Line::from(Span::raw(message.to_string())),
+        Line::from(Span::raw(sanitize_for_terminal(message))),
         Line::from(""),
         Line::from(Span::styled(
             "n: try another domain · q: quit",
@@ -121,7 +121,7 @@ fn draw_tree(frame: &mut Frame, area: Rect, app: &App, info: &ChainInfo, dimmed:
     let block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(chrome_color(dimmed)))
-        .title(format!(" {} ", app.domain.as_deref().unwrap_or("")));
+        .title(format!(" {} ", sanitize_for_terminal(app.domain.as_deref().unwrap_or(""))));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
