@@ -352,6 +352,108 @@ fn centered_rect(area: Rect, percent_x: u16, percent_y: u16) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::Terminal;
+
+    use crate::app::App;
+    use crate::chain::ChainAnalysis;
+
+    fn fake_node(subject: &str) -> CertNode {
+        CertNode {
+            subject: subject.to_string(),
+            subject_dn: format!("CN={subject}"),
+            issuer: "Test CA".to_string(),
+            issuer_dn: "CN=Test CA".to_string(),
+            serial: "01".to_string(),
+            pubkey_algorithm: "RSA".to_string(),
+            not_before: None,
+            not_after: None,
+        }
+    }
+
+    fn fake_chain_info() -> ChainInfo {
+        let hops = vec![
+            ChainHop { kind: NodeKind::Leaf, node: fake_node("leaf.example"), status: HopStatus::Valid },
+            ChainHop {
+                kind: NodeKind::Intermediate,
+                node: fake_node("Intermediate CA"),
+                status: HopStatus::Expired,
+            },
+            ChainHop {
+                kind: NodeKind::Root,
+                node: fake_node("Root CA"),
+                status: HopStatus::UnverifiedIssuer("no trusted root found".to_string()),
+            },
+        ];
+        ChainInfo {
+            analysis: ChainAnalysis { hops, reaches_trusted_root: false },
+            protocol_version: "TLS 1.3".to_string(),
+            cipher_suite: "TLS13_AES_256_GCM_SHA384".to_string(),
+            hsts: Hsts::MaxAge(63_072_000),
+        }
+    }
+
+    /// Every screen/overlay combination, rendered at a spread of terminal
+    /// sizes from absurdly tiny up to the documented 80x24 minimum and
+    /// beyond, must not panic. This is the layout-math equivalent of a
+    /// fuzz test: `Rect::inner` and the percentage `Layout` splits only
+    /// promise not to panic, not to look good, at sizes this small.
+    #[test]
+    fn draw_never_panics_across_extreme_terminal_sizes() {
+        for (width, height) in [(0, 0), (1, 1), (2, 1), (1, 2), (5, 3), (80, 24), (200, 60)] {
+            let backend = TestBackend::new(width, height);
+            let mut terminal = Terminal::new(backend).expect("backend should construct");
+
+            let mut app = App::new(None);
+            terminal.draw(|f| draw(f, &app)).expect("draw on Input screen");
+
+            app.domain_input = "a".repeat(60);
+            app.input_cursor = app.domain_input.chars().count();
+            terminal.draw(|f| draw(f, &app)).expect("draw with long input");
+
+            app.screen = Screen::Chain;
+            app.domain = Some("example.com".to_string());
+            app.fetch_result = None;
+            terminal.draw(|f| draw(f, &app)).expect("draw Chain screen with no result");
+
+            app.fetch_result = Some(Err("connection refused".to_string()));
+            terminal.draw(|f| draw(f, &app)).expect("draw Chain screen with error");
+
+            let info = fake_chain_info();
+            app.revealed = info.analysis.hops.len();
+            app.fetch_result = Some(Ok(info));
+            terminal.draw(|f| draw(f, &app)).expect("draw Chain screen with revealed chain");
+
+            app.show_detail = true;
+            terminal.draw(|f| draw(f, &app)).expect("draw with detail overlay open");
+
+            app.show_help = true;
+            terminal.draw(|f| draw(f, &app)).expect("draw with help overlay over detail");
+        }
+    }
+
+    /// The detail overlay reads `app.selected` into `hops[selected]` — if
+    /// selection could ever land past the end of a shorter, freshly
+    /// loaded chain (e.g. after `n` then a new lookup with fewer hops)
+    /// this would be an out-of-bounds index. `draw_detail_overlay` guards
+    /// it with `.get(..)`, so it should degrade to skipping the overlay
+    /// rather than panicking.
+    #[test]
+    fn detail_overlay_with_out_of_range_selection_does_not_panic() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).expect("backend should construct");
+
+        let mut app = App::new(None);
+        app.screen = Screen::Chain;
+        app.domain = Some("example.com".to_string());
+        let info = fake_chain_info();
+        app.revealed = info.analysis.hops.len();
+        app.selected = 999;
+        app.fetch_result = Some(Ok(info));
+        app.show_detail = true;
+
+        terminal.draw(|f| draw(f, &app)).expect("out-of-range selection must not panic");
+    }
 
     #[test]
     fn tls_1_0_and_1_1_are_weak() {
